@@ -38,3 +38,5 @@ jobs:
         with:
           name: koha-android-debug
           path: build-project/app/build/outputs/apk/debug/*.apk
+
+# build trigger
