@@ -27,12 +27,11 @@ jobs:
           java-version: '17'
           cache: gradle
 
-
       - name: Restore missing issued-books cache helper
         working-directory: build-project
         run: |
           cat > app/src/main/java/in/miaolibrary/app/IssuedBooksCache.kt <<'EOF'
-          package in.miaolibrary.app
+          package `in`.miaolibrary.app
 
           import android.content.Context
           import org.json.JSONArray
@@ -143,5 +142,3 @@ jobs:
         with:
           name: koha-android-debug
           path: build-project/app/build/outputs/apk/debug/*.apk
-
-# build trigger
