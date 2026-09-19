@@ -1,0 +1,40 @@
+name: Build Android APK
+
+on:
+  push:
+    paths:
+      - 'GxnuCVaBTXTE.zip'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract project
+        run: |
+          rm -rf build-project
+          mkdir build-project
+          unzip -q GxnuCVaBTXTE.zip -d build-project
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Build debug APK
+        working-directory: build-project
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: koha-android-debug
+          path: build-project/app/build/outputs/apk/debug/*.apk
