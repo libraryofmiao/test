@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Miao Library</title>
+<link rel="preconnect" href="https://api.miaolibrary.in" crossorigin>
+<link rel="dns-prefetch" href="https://api.miaolibrary.in">
 <style>
 :root{
   --bg:#F8F5EF; --surface:#FFFFFF; --ink:#1B2B3A; --muted:#69707A;
@@ -66,7 +68,9 @@ main{max-width:1200px;margin:0 auto;padding:18px 16px 90px;}
 
 /* home */
 .id-card{display:flex;gap:16px;align-items:flex-start;}
-.id-photo{width:84px;height:108px;border-radius:12px;background:#EEEBE5;object-fit:cover;flex-shrink:0;}
+.id-photo{width:84px;height:108px;border-radius:12px;background:linear-gradient(90deg,#EEEBE5 25%,#F6F3EE 50%,#EEEBE5 75%);background-size:200% 100%;object-fit:cover;flex-shrink:0;}
+.id-photo:not(.loaded){animation:shimmer 1.2s linear infinite;}
+@keyframes shimmer{to{background-position:-200% 0;}}
 .id-info .name{font-weight:700;font-size:17px;margin-bottom:4px;}
 .id-info .row{font-size:13px;color:var(--muted);margin-top:2px;}
 
@@ -136,7 +140,7 @@ main{max-width:1200px;margin:0 auto;padding:18px 16px 90px;}
         <h2>Home</h2>
         <div class="card" id="id-card-box">
           <div class="id-card">
-            <img class="id-photo" id="id-photo" alt="Member photo">
+            <img class="id-photo" id="id-photo" alt="Member photo" width="84" height="108" decoding="async" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7">
             <div class="id-info">
               <div class="name" id="id-name">—</div>
               <div class="row" id="id-cardno"></div>
@@ -206,12 +210,12 @@ function username(){return lsGet('username','Patron');}
 function memberInfo(){try{return JSON.parse(lsGet('member_info','null'));}catch(e){return null;}}
 function esc(s){const d=document.createElement('div');d.textContent=String(s);return d.innerHTML;}
 
-async function apiRequest(path,method='GET',body=null,auth=null){
+async function apiRequest(path,method='GET',body=null,auth=null,hi=false){
   const headers={'Accept':'application/json'};
   if(body)headers['Content-Type']='application/json';
   if(auth)headers['Authorization']='Bearer '+auth;
   try{
-    const res=await fetch(GATEWAY+path,{method,headers,body:body?JSON.stringify(body):undefined});
+    const res=await fetch(GATEWAY+path,{method,headers,body:body?JSON.stringify(body):undefined,priority:hi?'high':'auto'});
     const text=await res.text();
     return {ok:res.ok,text,status:res.status};
   }catch(e){
@@ -315,12 +319,13 @@ async function doLogin(){
     lsSet('access_token',access);
     lsSet('username',user);
     showApp();
-    loadMemberPhoto();
-    loadAccountInfo();
+    loadPrimary();
   }catch(e){err.textContent='Invalid gateway response.';}
 }
 function logout(){
-  ['access_token','username','member_info','cms_cache','cms_cache_time'].forEach(lsDel);
+  const u=username();
+  ['access_token','username','member_info','cms_cache','cms_cache_time','photo_cache:'+u,'photo_cache:'+u+':t'].forEach(lsDel);
+  resetPhoto();
   document.getElementById('app').classList.add('hidden');
   document.getElementById('login').classList.remove('hidden');
   document.getElementById('li-user').value='';
@@ -329,13 +334,41 @@ function logout(){
 
 /* ---------- home ---------- */
 async function loadAccountInfo(){
-  const res=await apiRequest('/account','GET',null,token());
+  const res=await apiRequest('/account','GET',null,token(),true);
   if(res.ok){lsSet('member_info',res.text);renderIdCard();}
 }
-async function loadMemberPhoto(){
+const BLANK_PX='data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+const PHOTO_TTL_MS=24*60*60*1000;
+function photoKey(){return 'photo_cache:'+username();}
+function applyPhoto(src){const el=document.getElementById('id-photo');el.src=src;el.classList.add('loaded');}
+function resetPhoto(){const el=document.getElementById('id-photo');el.src=BLANK_PX;el.classList.remove('loaded');}
+async function shrinkPhoto(blob){
   try{
-    const r=await fetch(GATEWAY+'/account/photo',{headers:{'Authorization':'Bearer '+token()}});
-    if(r.ok){const blob=await r.blob();document.getElementById('id-photo').src=URL.createObjectURL(blob);}
+    const bmp=await createImageBitmap(blob);
+    const w=168,h=216;
+    const s=Math.max(w/bmp.width,h/bmp.height);
+    const sw=w/s,sh=h/s;
+    const c=document.createElement('canvas');c.width=w;c.height=h;
+    c.getContext('2d').drawImage(bmp,(bmp.width-sw)/2,(bmp.height-sh)/2,sw,sh,0,0,w,h);
+    if(bmp.close)bmp.close();
+    return c.toDataURL('image/jpeg',0.82);
+  }catch(e){return null;}
+}
+async function loadMemberPhoto(){
+  const key=photoKey();
+  const cached=lsGet(key);
+  const at=parseInt(lsGet(key+':t','0'),10);
+  if(cached){
+    applyPhoto(cached);
+    if(Date.now()-at<PHOTO_TTL_MS)return;
+  }
+  try{
+    const r=await fetch(GATEWAY+'/account/photo',{headers:{'Authorization':'Bearer '+token()},priority:'high'});
+    if(!r.ok)return;
+    const blob=await r.blob();
+    const small=await shrinkPhoto(blob);
+    if(small){lsSet(key,small);lsSet(key+':t',String(Date.now()));applyPhoto(small);}
+    else applyPhoto(URL.createObjectURL(blob));
   }catch(e){}
 }
 function renderIdCard(){
@@ -495,6 +528,20 @@ async function loadIssueHistory(){
   renderBookList(el,items,false);
 }
 
+/* ---------- staged loading ---------- */
+let secondaryStarted=false;
+function startSecondary(){
+  if(secondaryStarted)return;
+  secondaryStarted=true;
+  loadAnnouncements();
+  loadMyBooks();
+}
+function loadPrimary(){
+  const p=Promise.allSettled([loadAccountInfo(),loadMemberPhoto()]);
+  if(memberInfo()){startSecondary();return;}
+  Promise.race([p,new Promise(r=>setTimeout(r,1500))]).then(startSecondary);
+}
+
 /* ---------- nav + boot ---------- */
 function switchSection(target){
   document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
@@ -506,10 +553,9 @@ function showApp(){
   document.getElementById('app').classList.remove('hidden');
   document.getElementById('welcome-name').textContent=username();
   document.getElementById('acc-username').textContent=username();
+  secondaryStarted=false;
   renderIdCard();
   switchSection('home');
-  loadAnnouncements();
-  loadMyBooks();
 }
 window.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('li-btn').addEventListener('click',doLogin);
@@ -521,7 +567,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   document.getElementById('logout-btn-2').addEventListener('click',logout);
   document.getElementById('modal-close').addEventListener('click',()=>document.getElementById('book-modal').classList.add('hidden'));
   document.querySelectorAll('.bottom-nav button').forEach(b=>b.addEventListener('click',()=>switchSection(b.dataset.target)));
-  if(token()){showApp();loadMemberPhoto();loadAccountInfo();}
+  if(token()){showApp();loadPrimary();}
 });
 </script>
 </body>
